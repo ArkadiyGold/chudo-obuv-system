@@ -455,6 +455,7 @@ class ProductDetailWindow(QMainWindow):
         self.role = role
         self.user_id = user_id
         self.full_name = full_name
+        self.final_price = 0.0
         self.init_ui()
 
     def init_ui(self):
@@ -472,12 +473,14 @@ class ProductDetailWindow(QMainWindow):
             return
 
         name, manufacturer, category, composition, description, image_path, final_price = product
+        self.final_price = float(final_price)
 
         form_layout = QFormLayout()
         form_layout.addRow("Наименование:", QLabel(name))
         form_layout.addRow("Производство:", QLabel(manufacturer))
         form_layout.addRow("Категория:", QLabel(category or "-"))
-        form_layout.addRow("Цена со скидкой:", QLabel(f"{final_price:.2f} руб."))
+        self.price_label = QLabel(f"{self.final_price:.2f} руб.")
+        form_layout.addRow("Цена со скидкой:", self.price_label)
         form_layout.addRow("Состав:", QLabel(composition or "-"))
         form_layout.addRow("Описание:", QLabel(description or "-"))
 
@@ -496,9 +499,8 @@ class ProductDetailWindow(QMainWindow):
         if sizes:
             size_layout = QHBoxLayout()
             self.size_combo = QComboBox()
-            self.size_combo.addItems([f"{s[0]} (остаток: {s[1]})" for s in sizes])
-            self.size_combo.setItemData(0, [s[0] for s in sizes][0]) 
-            self.size_combo.setItemData(0, [s[1] for s in sizes][0], Qt.UserRole)
+            for s in sizes:
+                self.size_combo.addItem(f"{s[0]} (остаток: {s[1]})", s[1])
             size_layout.addWidget(QLabel("Выберите размер:"))
             size_layout.addWidget(self.size_combo)
             layout.addLayout(size_layout)
@@ -518,21 +520,22 @@ class ProductDetailWindow(QMainWindow):
             layout.addWidget(QLabel("Товар временно отсутствует на складе."))
 
     def place_order(self):
-        size_data = self.size_combo.currentData(Qt.UserRole)
-        if not size_data:
+        max_qty = self.size_combo.currentData()
+        if max_qty is None:
             QMessageBox.warning(self, "Ошибка", "Необходимо выбрать размер.")
             return
 
-        size_value = self.size_combo.currentText().split(" ")[0]
+        size_text = self.size_combo.currentText().split(" ")[0]
         quantity = int(self.qty_input.text())
 
-        if quantity > size_data:
-            QMessageBox.warning(self, "Ошибка", f"Выбранное количество ({quantity}) превышает доступный остаток ({size_data}).")
+        if quantity > max_qty:
+            QMessageBox.warning(self, "Ошибка", 
+                f"Выбранное количество ({quantity}) превышает доступный остаток ({max_qty}).")
             return
 
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM sizes WHERE size_value = %s", (size_value,))
+        cursor.execute("SELECT id FROM sizes WHERE size_value = %s", (size_text,))
         size_id = cursor.fetchone()[0]
         cursor.close()
         conn.close()
@@ -541,7 +544,7 @@ class ProductDetailWindow(QMainWindow):
             'product_id': self.product_id,
             'size_id': size_id,
             'quantity': quantity,
-            'price': float(self.findChild(QLabel, "").text().split()[0]) 
+            'price': self.final_price
         }]
         
         if create_order(self.user_id, items):
